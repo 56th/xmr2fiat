@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json
+import os, json, time
 from enum import Enum, auto
 from decimal import Decimal
 from loguru import logger
@@ -35,12 +35,15 @@ class Course(FiatDict):
             super().__setitem__(k, Decimal(v))
         else:
             raise ValueError(f'Value {v} is invalid')
-    def load(self, default_value = 1):
+    def load(self, default_value = 1) -> str:
         for fiat in Fiat:
             self[fiat] = default_value
-        with open(Course.io_path(), 'r') as f: 
-            for key, val in json.load(f).items():
-                self[key] = val
+        if os.path.isfile(Course.io_path()):
+            with open(Course.io_path(), 'r') as f: 
+                for key, val in json.load(f).items():
+                    self[key] = val
+            return time.ctime(os.path.getmtime(Course.io_path()))
+        return time.ctime()
     def save(self):
         with open(Course.io_path(), 'w') as f:
             json.dump({key: float(val) for key, val in self.items()}, f)
@@ -73,7 +76,7 @@ if __name__ == '__main__':
     if args.list:
         logger.info([fiat.name for fiat in Fiat])
     course = Course()        
-    course.load()
+    logger.info('last update: {}', course.load())
     if args.update:
         import apis
         course.load_mean_from(apis.yahoo, apis.coinmarketcap)
