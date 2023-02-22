@@ -10,49 +10,64 @@ class Fiat(Enum):
     EUR = auto()
     RUB = auto()
     def from_xmr(self, amt: Decimal = 1) -> Decimal:
-        return Fiat.course[self.name] * amt
+        return Fiat.course[self] * amt
     def to_xmr(self, amt: Decimal = 1) -> Decimal:
         return 1 / self.from_xmr(amt)
 
-Course = Dict[str, Decimal]
-
-def get_mean_course_from(*apis) -> Course:
-    mean_course = {fiat.name: [] for fiat in Fiat}
-    for api in apis:
-        try:
-            course = api()
-        except Exception as e:
-            logger.error('API call {}() failed: {}', api.__name__, e)
-        logger.info('API call {}(): {}', api.__name__, course)
-        for fiat, val in course.items():
-            if val:
-                mean_course[fiat].append(course[fiat])
-            else:
-                logger.error('API call {}() returned invalid value {} for {}', api.__name__, val, fiat)        
-    for fiat in Fiat:
-        if mean_course[fiat.name]:
-            mean_course[fiat.name] = sum(mean_course[fiat.name]) / len(mean_course[fiat.name])
+class FiatDict(dict):
+    def __setitem__(self, k, v):
+        if isinstance(k, Fiat):
+            super().__setitem__(k.name, v)
+        elif k in (fiat.name for fiat in Fiat):
+            super().__setitem__(k, v)
         else:
-            mean_course[fiat.name] = Fiat.course[fiat.name]
-            logger.error('all API calls for {} failed -> using prev value {}', fiat.name, mean_course[fiat.name])
-    return mean_course
+            raise KeyError(f'Key {k} is invalid')
+    def __getitem__(self, k):
+        if isinstance(k, Fiat):
+            return super().__getitem__(k.name)
+        return super().__getitem__(k)
 
-def import_course() -> Course:
-    with open(os.path.expanduser('~/.xmr-fiat.json'), 'r') as f:
-        try:
-            return {Fiat[key].name: Decimal(val) for key, val in json.load(f).items()}
-        except:
-            logger.error('.xmr-fiat.json is inconsistent with Fiat enum')
-
-Fiat.course = import_course()
-
-def export_course(course: Course):
-    with open(os.path.expanduser('~/.xmr-fiat.json'), 'w') as f:
-        json.dump({key: float(val) for key, val in course.items()}, f)
+class Course(FiatDict):
+    @classmethod
+    def io_path(cls) -> str:
+        return os.path.expanduser('~/.xmr-fiat.json')
+    def __setitem__(self, k, v):
+        val = Decimal(v)
+        if val:
+            super().__setitem__(k, val)
+        else:
+            raise ValueError(f'Value {val} is invalid')
+    def load(self):
+        with open(Course.io_path(), 'r') as f: 
+            for key, val in json.load(f).items():
+                self[key] = val
+    def save(self):
+        with open(Course.io_path(), 'w') as f:
+            json.dump({key: float(val) for key, val in self.items()}, f)
+    def load_mean_from(self, *apis):
+        courses = FiatDict()
+        for fiat in Fiat:
+            courses[fiat] = []
+        for api in apis:
+            try:
+                course = api()
+                logger.info('API call {}(): {}', api.__name__, course)
+                for fiat, val in course.items():
+                    courses[fiat].append(val)
+            except Exception as e:
+                logger.error('API call {}() failed: {}', api.__name__, e)
+        for fiat, val in courses.items():
+            if val:
+                self[fiat] = sum(val) / len(val)
+            else:
+                self[fiat] = Fiat.course[fiat]
+                logger.error('all API calls for {} failed -> using prev value {}', fiat, self[fiat])
 
 if __name__ == '__main__':
+    Fiat.course = Course()
+    Fiat.course.load()
     import apis
-    Fiat.course = get_mean_course_from(apis.yahoo, apis.coinmarketcap)
+    Fiat.course.load_mean_from(apis.yahoo, apis.coinmarketcap)
     logger.info('course: {}', Fiat.course)
     logger.info('5 USD to XMR: {}', Fiat.USD.to_xmr(5))
-    export_course(Fiat.course)
+    Fiat.course.save()
