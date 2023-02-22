@@ -3,7 +3,6 @@ import os, json
 from enum import Enum, auto
 from decimal import Decimal
 from loguru import logger
-from typing import Dict
 
 class Fiat(Enum):
     USD = auto()
@@ -32,11 +31,10 @@ class Course(FiatDict):
     def io_path(cls) -> str:
         return os.path.expanduser('~/.xmr2fiat.json')
     def __setitem__(self, k, v):
-        val = Decimal(v)
-        if val:
-            super().__setitem__(k, val)
+        if v > 0:
+            super().__setitem__(k, Decimal(v))
         else:
-            raise ValueError(f'Value {val} is invalid')
+            raise ValueError(f'Value {v} is invalid')
     def load(self, default_value = 1):
         for fiat in Fiat:
             self[fiat] = default_value
@@ -62,7 +60,6 @@ class Course(FiatDict):
             if val:
                 self[fiat] = sum(val) / len(val)
             else:
-                self[fiat] = Fiat.course[fiat]
                 logger.error('all API calls for {} failed -> using prev value {}', fiat, self[fiat])
 
 if __name__ == '__main__':
@@ -71,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--update', action=argparse.BooleanOptionalAction, help='call APIs to update XMR course')
     parser.add_argument('-l', '--list', action=argparse.BooleanOptionalAction, help='list available fiat currencies')
     parser.add_argument('-f', '--fiat', type=lambda f: Fiat[f], default=Fiat.USD, choices=list(Fiat), help='currency to work with')
-    parser.add_argument('amount', type=float, default=0., help='amount to convert')
+    parser.add_argument('-a', '--amount', type=float, default=0., help='amount to convert')
     args = parser.parse_args()
     if args.list:
         logger.info([fiat.name for fiat in Fiat])
